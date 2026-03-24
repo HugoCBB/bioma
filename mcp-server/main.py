@@ -1,6 +1,6 @@
 from fastmcp import FastMCP
 
-mcp = FastMCP("jarvis-mcp-server")
+mcp = FastMCP("bioma-mcp-server")
 
 @mcp.tool
 def schedule():
