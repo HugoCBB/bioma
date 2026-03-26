@@ -3,13 +3,13 @@ from fastmcp import FastMCP
 mcp = FastMCP("bioma-mcp-server")
 
 @mcp.tool
-def schedule():
+def schedule_google_calendar():
     """
     Funcao responsavel por agendar compromissos no google calendar
     """
 
 @mcp.tool
-def to_google_drive():
+def save_google_drive():
     """
     Funcao responsavel por salvar o arquivo no google drive 
     """
