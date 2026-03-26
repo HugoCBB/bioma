@@ -1,12 +1,41 @@
+from domain.google_calendar import CreateSchedule
+import requests
 from fastmcp import FastMCP
+
 
 mcp = FastMCP("bioma-mcp-server")
 
+urls = {
+    "google_calendar": "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+}
+
 @mcp.tool
-def schedule_google_calendar():
-    """
-    Funcao responsavel por agendar compromissos no google calendar
-    """
+def schedule_google_calendar(input: CreateSchedule, acess_token: str):
+    """Funcao responsavel por agendar compromissos no google calendar"""
+    headers = {
+        "Authorization": f"Bearer {acess_token}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = input.model_dump()
+    try:
+        response = requests.post(urls["google_calendar"], headers=headers, json=payload)
+        response.raise_for_status()
+        
+        return_data = response.json()
+        event_link = return_data.get("htmlLink", "Link indisponível")
+        
+        return f"Sucesso! Evento criado no Google Calendar. Link: {event_link}"
+        
+    except requests.exceptions.HTTPError as e:
+        error = e.response.json()
+        message_error = error.get('error', {}).get('message', str(e))
+        
+        return f"Falha ao criar o evento no Google Calendar. Erro da API: {message_error}"
+    except Exception as e:
+        return f"Erro interno ao tentar comunicar com o Google Calendar: {str(e)}"
+    
+    
 
 @mcp.tool
 def save_google_drive():

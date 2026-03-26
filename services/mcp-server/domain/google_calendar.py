@@ -11,6 +11,6 @@ class CreateSchedule(BaseModel):
     summary: str
     description: Optional[str] = None
     timeZone: Optional[str] = None
-    start: EventDateTime
-    end: EventDateTime
+    start: str
+    end: Optional[str] = None
     
