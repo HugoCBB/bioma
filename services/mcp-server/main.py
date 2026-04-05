@@ -1,6 +1,6 @@
 from domain.google_calendar import CreateSchedule
 import requests
-from fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP
 
 
 mcp = FastMCP("bioma-mcp-server")
@@ -9,8 +9,19 @@ urls = {
     "google_calendar": "https://www.googleapis.com/calendar/v3/calendars/primary/events",
 }
 
-@mcp.tool
-def schedule_google_calendar(input: CreateSchedule, acess_token: str):
+
+@mcp.tool()
+async def great(name):
+    """Saudacao para usuario"""
+    return f"Hello {name}, how are you? Im fine thanks!!"
+
+@mcp.tool()
+async def sum(a, b) -> int:
+    """Soma dois numeros"""
+    return a + b
+
+@mcp.tool()
+async def schedule_google_calendar(input: CreateSchedule, acess_token: str):
     """Funcao responsavel por agendar compromissos no google calendar"""
     headers = {
         "Authorization": f"Bearer {acess_token}",
@@ -37,11 +48,11 @@ def schedule_google_calendar(input: CreateSchedule, acess_token: str):
     
     
 
-@mcp.tool
+@mcp.tool()
 def save_google_drive():
     """
     Funcao responsavel por salvar o arquivo no google drive 
     """
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="http", port=8000)
