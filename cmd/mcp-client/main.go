@@ -86,7 +86,7 @@ func main() {
 
 	agentExecutor := newAgent(llm, mcpTools)
 
-	result, err := run(ctx, agentExecutor, "My name is Hugo")
+	result, err := run(ctx, agentExecutor, "Quuais as tools do meu mcp")
 	if err != nil {
 		log.Fatal(err)
 	}
