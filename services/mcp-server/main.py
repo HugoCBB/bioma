@@ -11,16 +11,6 @@ urls = {
 
 
 @mcp.tool()
-async def great(name):
-    """Saudacao para usuario"""
-    return f"Hello {name}, how are you? Im fine thanks!!"
-
-@mcp.tool()
-async def sum(a, b) -> int:
-    """Soma dois numeros"""
-    return a + b
-
-@mcp.tool()
 async def schedule_google_calendar(input: CreateSchedule, acess_token: str):
     """Funcao responsavel por agendar compromissos no google calendar"""
     headers = {

@@ -9,9 +9,11 @@ require (
 	github.com/mark3labs/mcp-go v0.47.0
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/tmc/langchaingo v0.1.14
+	golang.org/x/oauth2 v0.30.0
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.6.0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.2.0 // indirect
 	github.com/Masterminds/sprig/v3 v3.2.3 // indirect
