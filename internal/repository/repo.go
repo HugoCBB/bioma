@@ -10,12 +10,12 @@ import (
 	"golang.org/x/oauth2"
 )
 
-type AuthRepository struct {
+type Repository struct {
 	rdb *redis.Client
 }
 
-func NewAuthRepository(rdb *redis.Client) *AuthRepository {
-	return &AuthRepository{rdb: rdb}
+func NewRepository(rdb *redis.Client) *Repository {
+	return &Repository{rdb: rdb}
 }
 
 const tokenKeyPrefix = "user:token:"
@@ -24,7 +24,7 @@ func tokenKey(userId string) string {
 	return fmt.Sprintf("%s%s", tokenKeyPrefix, userId)
 }
 
-func (a *AuthRepository) SaveToken(ctx context.Context, userId string, token *oauth2.Token) error {
+func (a *Repository) SaveToken(ctx context.Context, userId string, token *oauth2.Token) error {
 	data, err := json.Marshal(token)
 	if err != nil {
 		return fmt.Errorf("erro ao serializar token: %w", err)
@@ -42,7 +42,7 @@ func (a *AuthRepository) SaveToken(ctx context.Context, userId string, token *oa
 	return nil
 }
 
-func (a *AuthRepository) GetToken(ctx context.Context, rdb *redis.Client, userId string) (*oauth2.Token, error) {
+func (a *Repository) GetToken(ctx context.Context, userId string) (*oauth2.Token, error) {
 	data, err := a.rdb.Get(ctx, tokenKey(userId)).Bytes()
 	if err != nil {
 		return nil, fmt.Errorf("token não encontrado para user %s: %w", userId, err)

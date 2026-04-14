@@ -8,12 +8,11 @@ import (
 	"github.com/bioma/internal/infra"
 )
 
-func init() {
-	config.LoadEnv()
-}
-
 func main() {
 	ctx := context.Background()
+	config.LoadEnv()
+
+	googleCfg := config.NewGoogleClientSetup()
 	rdb := infra.NewClientRedis(ctx)
-	handler.HandlerRequest(rdb)
+	handler.HandlerRequest(rdb, googleCfg)
 }
