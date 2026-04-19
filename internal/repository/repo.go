@@ -42,7 +42,7 @@ func (a *Repository) SaveToken(ctx context.Context, userId string, token *oauth2
 	return nil
 }
 
-func (a *Repository) GetToken(ctx context.Context, userId string) (*oauth2.Token, error) {
+func (a *Repository) GetToken(ctx context.Context, userId string, cfg *oauth2.Config) (*oauth2.Token, error) {
 	data, err := a.rdb.Get(ctx, tokenKey(userId)).Bytes()
 	if err != nil {
 		return nil, fmt.Errorf("token não encontrado para user %s: %w", userId, err)
@@ -53,5 +53,18 @@ func (a *Repository) GetToken(ctx context.Context, userId string) (*oauth2.Token
 		return nil, fmt.Errorf("erro ao desserializar token: %w", err)
 	}
 
+	if token.Expiry.Before(time.Now()) {
+		tokenSource := cfg.TokenSource(ctx, &token)
+		newToken, err := tokenSource.Token()
+		if err != nil {
+			return nil, fmt.Errorf("erro ao renovar token: %w", err)
+		}
+
+		if err := a.SaveToken(ctx, userId, newToken); err != nil {
+			return nil, err
+		}
+		return newToken, nil
+
+	}
 	return &token, nil
 }
