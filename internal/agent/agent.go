@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -11,69 +12,45 @@ import (
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/tmc/langchaingo/llms"
-	"github.com/tmc/langchaingo/llms/ollama"
+	"github.com/tmc/langchaingo/llms/openai"
 )
 
-func RunAgent(ctx context.Context, message, accessToken string) (string, error) {
-	mcpClient, err := client.NewStreamableHttpClient(
-		"http://localhost:8000/mcp",
-		transport.WithHTTPHeaders(map[string]string{
-			"X-Access-Token": accessToken,
-		}),
+type Agent struct {
+	llm llms.Model
+}
+
+func New() (*Agent, error) {
+	llm, err := openai.New(
+		openai.WithBaseURL("https://api.groq.com/openai/v1"),
+		openai.WithToken(os.Getenv("GROQ_API_KEY")),
+		openai.WithModel("llama-3.1-8b-instant"),
 	)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao criar LLM: %w", err)
+	}
+	return &Agent{llm: llm}, nil
+}
+
+func (a *Agent) Run(ctx context.Context, message, accessToken string) (string, error) {
+	mcpClient, err := a.newMCPClient(ctx, accessToken)
 	if err != nil {
 		return "", err
 	}
 	defer mcpClient.Close()
 
-	_, err = mcpClient.Initialize(ctx, mcp.InitializeRequest{})
+	tools, err := a.listTools(ctx, mcpClient)
 	if err != nil {
 		return "", err
 	}
 
-	toolsResult, err := mcpClient.ListTools(ctx, mcp.ListToolsRequest{})
+	intent, err := a.extractIntent(ctx, message)
 	if err != nil {
 		return "", err
 	}
 
-	var toolsDesc strings.Builder
-	toolsDesc.WriteString("You have access to these tools:\n")
-	for _, t := range toolsResult.Tools {
-		schema, _ := json.Marshal(t.InputSchema)
-		toolsDesc.WriteString(fmt.Sprintf("- %s: %s\n  Schema: %s\n", t.Name, t.Description, schema))
-	}
+	resolvedStart, resolvedEnd := a.resolveDatetime(intent)
 
-	llm, err := ollama.New(
-		ollama.WithModel("llama3.1"),
-		ollama.WithServerURL("http://localhost:11434"),
-	)
-	if err != nil {
-		return "", err
-	}
-
-	intent, err := extractIntent(ctx, llm, message)
-	if err != nil {
-		return "", fmt.Errorf("erro ao extrair intent: %w", err)
-	}
-
-	resolvedStart, resolvedEnd := resolveDatetime(intent)
-
-	systemPrompt := fmt.Sprintf(`%s
-Today's date: %s (weekday: %s)
-Resolved start datetime: %s
-Resolved end datetime: %s
-
-Rules:
-- If you need to use a tool, respond ONLY with a JSON object like this:
-{"tool": "tool_name", "args": {"field1": "value1", "field2": "value2"}}
-- Use exactly the "Resolved start datetime" and "Resolved end datetime" above for the event datetimes — do NOT recalculate them.
-- If the user's message is not about scheduling, respond normally in the user's language.
-- Never mix JSON with text. Either pure JSON or pure text.
-`, toolsDesc.String(), time.Now().Format("2006-01-02"), time.Now().Weekday(), resolvedStart, resolvedEnd)
-
-	response, err := llm.Call(ctx, systemPrompt+"\nUser: "+message,
-		llms.WithTemperature(0.1),
-	)
+	response, err := a.think(ctx, message, tools, resolvedStart, resolvedEnd)
 	if err != nil {
 		return "", err
 	}
@@ -83,11 +60,61 @@ Rules:
 		return response, nil
 	}
 
-	toolCall.Args["start_datetime"] = resolvedStart
-	toolCall.Args["end_datetime"] = resolvedEnd
-	toolCall.Args["access_token"] = accessToken
+	return a.callTool(ctx, mcpClient, toolCall, accessToken, resolvedStart, resolvedEnd)
+}
 
-	fmt.Printf("[DEBUG] Tool: %s\nArgs: %+v\n", toolCall.Tool, toolCall.Args)
+func (a *Agent) newMCPClient(ctx context.Context, accessToken string) (*client.Client, error) {
+	mcpClient, err := client.NewStreamableHttpClient(
+		"http://localhost:8000/mcp",
+		transport.WithHTTPHeaders(map[string]string{
+			"X-Access-Token": accessToken,
+		}),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := mcpClient.Initialize(ctx, mcp.InitializeRequest{}); err != nil {
+		return nil, err
+	}
+	return mcpClient, nil
+}
+
+func (a *Agent) listTools(ctx context.Context, mcpClient *client.Client) (string, error) {
+	toolsResult, err := mcpClient.ListTools(ctx, mcp.ListToolsRequest{})
+	if err != nil {
+		return "", err
+	}
+
+	var sb strings.Builder
+	sb.WriteString("You have access to these tools:\n")
+	for _, t := range toolsResult.Tools {
+		schema, _ := json.Marshal(t.InputSchema)
+		sb.WriteString(fmt.Sprintf("- %s: %s\n  Schema: %s\n", t.Name, t.Description, schema))
+	}
+	return sb.String(), nil
+}
+
+func (a *Agent) think(ctx context.Context, message, tools, resolvedStart, resolvedEnd string) (string, error) {
+	systemPrompt := fmt.Sprintf(`%s
+Today's date: %s (weekday: %s)
+Resolved start datetime: %s
+Resolved end datetime: %s
+
+Rules:
+- If you need to use a tool, respond ONLY with a JSON object like this:
+{"tool": "tool_name", "args": {"field1": "value1"}}
+- Use exactly the resolved datetimes above, do NOT recalculate them.
+- If the message is not about scheduling, respond normally in the user's language.
+- Never mix JSON with text. Either pure JSON or pure text.
+`, tools, time.Now().Format("2006-01-02"), time.Now().Weekday(), resolvedStart, resolvedEnd)
+
+	return a.llm.Call(ctx, systemPrompt+"\nUser: "+message, llms.WithTemperature(0.1))
+}
+
+func (a *Agent) callTool(ctx context.Context, mcpClient *client.Client, toolCall toolCallPayload, accessToken, start, end string) (string, error) {
+	toolCall.Args["start_datetime"] = start
+	toolCall.Args["end_datetime"] = end
+	toolCall.Args["access_token"] = accessToken
 
 	result, err := mcpClient.CallTool(ctx, mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
@@ -98,48 +125,56 @@ Rules:
 	if err != nil {
 		return "", fmt.Errorf("erro ao chamar tool %s: %w", toolCall.Tool, err)
 	}
-
 	if len(result.Content) == 0 {
 		return "Tool executada mas sem resposta.", nil
 	}
-
 	return result.Content[0].(mcp.TextContent).Text, nil
 }
 
-func extractIntent(ctx context.Context, llm *ollama.LLM, message string) (map[string]any, error) {
-	prompt := fmt.Sprintf(`Extract the scheduling intent from this message and respond ONLY with a JSON object, no extra text:
-		{
-		"weekday": "sunday|monday|tuesday|wednesday|thursday|friday|saturday or null",
-		"summary": "event title",
-		"start_time": "HH:MM in 24h format, or null if not mentioned",
-		"end_time": "HH:MM in 24h format, max 23:59, or null if not mentioned"
-		}
+func (a *Agent) extractIntent(ctx context.Context, message string) (map[string]any, error) {
+	prompt := fmt.Sprintf(`Today is %s (%s).
 
-		Important: end_time must never be "24:00". If not mentioned, return null.
+Extract the scheduling intent from this message and respond ONLY with a JSON object:
+{
+  "date": "YYYY-MM-DD of the event, calculated from today",
+  "summary": "event title",
+  "start_time": "HH:MM in 24h format, or null if not mentioned",
+  "end_time": "HH:MM in 24h format, max 23:59, or null if not mentioned"
+}
 
-		Message: %s`, message)
+Rules:
+- "amanhã" or "tomorrow" = today + 1 day
+- "hoje" or "today" = today
+- "segunda", "monday" = next monday, and so on for any language
+- end_time must never be "24:00", return null if not mentioned
+- Always return a valid date, never null
 
-	response, err := llm.Call(ctx, prompt, llms.WithTemperature(0.0))
+Message: %s`,
+		time.Now().Format("2006-01-02"),
+		time.Now().Weekday(),
+		message,
+	)
+
+	response, err := a.llm.Call(ctx, prompt, llms.WithTemperature(0.0))
 	if err != nil {
 		return nil, err
 	}
 
 	start := strings.Index(response, "{")
 	end := strings.LastIndex(response, "}")
-	if start == -1 || end == -1 || end <= start {
-		return nil, fmt.Errorf("intent JSON not found in response: %s", response)
+	if start == -1 || end == -1 {
+		return nil, fmt.Errorf("intent JSON not found: %s", response)
 	}
 
 	var intent map[string]any
 	if err := json.Unmarshal([]byte(response[start:end+1]), &intent); err != nil {
-		return nil, fmt.Errorf("erro ao parsear intent: %w", err)
+		return nil, err
 	}
-
 	return intent, nil
 }
-func resolveDatetime(intent map[string]any) (string, string) {
-	startTime := "09:00"
-	endTime := "10:00"
+
+func (a *Agent) resolveDatetime(intent map[string]any) (string, string) {
+	startTime, endTime := "09:00", "10:00"
 
 	if v, ok := intent["start_time"].(string); ok && v != "null" && v != "" {
 		startTime = v
@@ -147,42 +182,18 @@ func resolveDatetime(intent map[string]any) (string, string) {
 	if v, ok := intent["end_time"].(string); ok && v != "null" && v != "" && v != "24:00" {
 		endTime = v
 	}
-
 	if endTime == "10:00" && startTime != "09:00" {
-		start, err := time.Parse("15:04", startTime)
-		if err == nil {
+		if start, err := time.Parse("15:04", startTime); err == nil {
 			endTime = start.Add(time.Hour).Format("15:04")
 		}
 	}
 
-	date := time.Now()
-	if v, ok := intent["weekday"].(string); ok && v != "null" && v != "" {
-		date = nextWeekday(parseWeekday(v))
+	date := time.Now().Format("2006-01-02")
+	if v, ok := intent["date"].(string); ok && v != "" && v != "null" {
+		date = v
 	}
 
-	dateStr := date.Format("2006-01-02")
-	return dateStr + "T" + startTime + ":00", dateStr + "T" + endTime + ":00"
-}
-func nextWeekday(target time.Weekday) time.Time {
-	now := time.Now()
-	daysUntil := int(target) - int(now.Weekday())
-	if daysUntil <= 0 {
-		daysUntil += 7
-	}
-	return now.AddDate(0, 0, daysUntil)
-}
-
-func parseWeekday(s string) time.Weekday {
-	days := map[string]time.Weekday{
-		"sunday":    time.Sunday,
-		"monday":    time.Monday,
-		"tuesday":   time.Tuesday,
-		"wednesday": time.Wednesday,
-		"thursday":  time.Thursday,
-		"friday":    time.Friday,
-		"saturday":  time.Saturday,
-	}
-	return days[strings.ToLower(s)]
+	return date + "T" + startTime + ":00", date + "T" + endTime + ":00"
 }
 
 type toolCallPayload struct {

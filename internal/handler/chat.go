@@ -8,14 +8,22 @@ import (
 	"github.com/bioma/internal/domain"
 	"github.com/bioma/internal/repository"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/oauth2"
 )
 
 type ChatHandler struct {
-	repo *repository.Repository
+	repo  *repository.Repository
+	cfg   *oauth2.Config
+	agent *agent.Agent
 }
 
-func NewChatHandlerSetup(repo *repository.Repository) *ChatHandler {
-	return &ChatHandler{repo: repo}
+func NewChatHandlerSetup(repo *repository.Repository, cfg *oauth2.Config) *ChatHandler {
+	a, _ := agent.New()
+	return &ChatHandler{
+		repo:  repo,
+		cfg:   cfg,
+		agent: a,
+	}
 }
 
 func (r *ChatHandler) handlerChat(c *gin.Context) {
@@ -26,7 +34,7 @@ func (r *ChatHandler) handlerChat(c *gin.Context) {
 		return
 	}
 
-	token, err := r.repo.GetToken(c, payload.UserId)
+	token, err := r.repo.GetToken(c, payload.UserId, r.cfg)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":     "usuário não autenticado",
@@ -37,7 +45,7 @@ func (r *ChatHandler) handlerChat(c *gin.Context) {
 
 	ctx := context.WithValue(c.Request.Context(), "access_token", token.AccessToken)
 
-	result, err := agent.RunAgent(ctx, payload.Message, token.AccessToken)
+	result, err := r.agent.Run(ctx, payload.Message, token.AccessToken)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

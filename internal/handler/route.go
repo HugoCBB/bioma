@@ -13,7 +13,7 @@ func HandlerRequest(rdb *redis.Client, cfg *oauth2.Config) {
 	r := gin.Default()
 	repo := repository.NewRepository(rdb)
 	authHandler := NewAuthHandlerSetup(repo, cfg)
-	chatHandler := NewChatHandlerSetup(repo)
+	chatHandler := NewChatHandlerSetup(repo, cfg)
 
 	api := r.Group("")
 	{
