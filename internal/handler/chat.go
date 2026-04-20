@@ -18,7 +18,10 @@ type ChatHandler struct {
 }
 
 func NewChatHandlerSetup(repo *repository.Repository, cfg *oauth2.Config) *ChatHandler {
-	a, _ := agent.New()
+	a, err := agent.New(nil)
+	if err != nil {
+		panic("falha ao inicializar agente: " + err.Error())
+	}
 	return &ChatHandler{
 		repo:  repo,
 		cfg:   cfg,
